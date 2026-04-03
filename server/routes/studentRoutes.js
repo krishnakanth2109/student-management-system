@@ -6,8 +6,9 @@ import dotenv from 'dotenv';
 import Document from '../models/Document.js';
 import Fee from '../models/Fee.js';
 import Faculty from '../models/Faculty.js';
+import Curriculum from '../models/Curriculum.js';
+import Student from '../models/Student.js'; // <-- Added Student import
 import { verifyStudent } from '../middleware/auth.js';
-import Curriculum from '../models/Curriculum.js'; // <-- Import at the top
 
 dotenv.config();
 const router = express.Router();
@@ -61,22 +62,29 @@ router.get('/documents', verifyStudent, async (req, res) => {
 });
 
 // ==========================================
-// FACULTY & FEE ROUTES (Unchanged)
+// FACULTY DETAILS FOR STUDENT
 // ==========================================
 router.get('/instructors', verifyStudent, async (req, res) => {
   try {
     const instructors = await Faculty.find({}, 'fullName department email');
     res.status(200).json(instructors);
-  } catch (error) { res.status(500).json({ message: 'Error fetching instructors', error: error.message }); }
+  } catch (error) { 
+    res.status(500).json({ message: 'Error fetching instructors', error: error.message }); 
+  }
 });
 
+// ==========================================
+// FEE ROUTES
+// ==========================================
 router.get('/fees', verifyStudent, async (req, res) => {
   try {
     const fees = await Fee.find({ studentId: req.user.id });
     let totalDue = 0;
     fees.forEach(f => { totalDue += ((f.tuitionFee + f.labFee + f.libraryFee) - f.amountPaid); });
     res.status(200).json({ fees, totalDue });
-  } catch (error) { res.status(500).json({ message: 'Failed to fetch fees', error: error.message }); }
+  } catch (error) { 
+    res.status(500).json({ message: 'Failed to fetch fees', error: error.message }); 
+  }
 });
 
 router.post('/fees/pay/:feeId', verifyStudent, async (req, res) => {
@@ -96,8 +104,14 @@ router.post('/fees/pay/:feeId', verifyStudent, async (req, res) => {
 
     await fee.save();
     res.status(200).json({ message: 'Payment successful', fee });
-  } catch (error) { res.status(500).json({ message: 'Payment failed', error: error.message }); }
+  } catch (error) { 
+    res.status(500).json({ message: 'Payment failed', error: error.message }); 
+  }
 });
+
+// ==========================================
+// CURRICULUM ROUTE
+// ==========================================
 router.get('/curriculum', verifyStudent, async (req, res) => {
   try {
     // Populate faculty name so student knows who teaches it
@@ -107,45 +121,13 @@ router.get('/curriculum', verifyStudent, async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch curriculum', error: error.message });
   }
 });
-// Get Dashboard Statistics
-router.get('/dashboard-stats', verifyAdmin, async (req, res) => {
-  try {
-    const totalStudents = await Student.countDocuments();
-    const totalFaculty = await Faculty.countDocuments();
-    const totalCourses = await Course.countDocuments();
-    const pendingDocs = await Document.countDocuments({ status: 'Pending' });
 
-    // Aggregate Students by Course for the Bar Chart
-    const studentsByCourse = await Student.aggregate([
-      { $group: { _id: "$course", count: { $sum: 1 } } },
-      { $project: { name: "$_id", students: "$count", _id: 0 } }
-    ]);
-
-    // Aggregate Students by Gender for the Pie Chart
-    const studentsByGender = await Student.aggregate([
-      { $group: { _id: "$gender", value: { $sum: 1 } } },
-      { $project: { name: "$_id", value: 1, _id: 0 } }
-    ]);
-
-    // Get 5 most recent student enrollments
-    const recentActivity = await Student.find()
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('firstName lastName course createdAt');
-
-    res.status(200).json({
-      totals: { totalStudents, totalFaculty, totalCourses, pendingDocs },
-      charts: { studentsByCourse, studentsByGender },
-      recentActivity
-    });
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching dashboard stats', error: error.message });
-  }
-});
-// Get Dashboard Statistics for the Logged-in Student
+// ==========================================
+// STUDENT DASHBOARD STATS
+// ==========================================
 router.get('/dashboard-stats', verifyStudent, async (req, res) => {
   try {
-    // 1. Get Logged-in Student Data (for Name and Course)
+    // 1. Get Logged-in Student Data
     const studentInfo = await Student.findById(req.user.id).select('firstName lastName course');
 
     // 2. Count Total Uploaded Documents
@@ -156,7 +138,7 @@ router.get('/dashboard-stats', verifyStudent, async (req, res) => {
     let pendingFees = 0;
     fees.forEach(f => { pendingFees += ((f.tuitionFee + f.labFee + (f.libraryFee || 0)) - f.amountPaid); });
 
-    // 4. Get Curriculum Stats (Group chapters by Subject to show on a chart)
+    // 4. Get Curriculum Stats
     const curriculumData = await Curriculum.aggregate([
       { $group: { _id: "$subjectName", count: { $sum: 1 } } },
       { $project: { subject: "$_id", chapters: "$count", _id: 0 } }
@@ -179,4 +161,5 @@ router.get('/dashboard-stats', verifyStudent, async (req, res) => {
     res.status(500).json({ message: 'Error fetching student stats', error: error.message });
   }
 });
+
 export default router;

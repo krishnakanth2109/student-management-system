@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import session from 'express-session';
+import path from 'path';
 
 // Import Routes
 import authRoutes from './routes/authRoutes.js';
@@ -14,52 +15,72 @@ dotenv.config();
 
 const app = express();
 
-// Required if you are hosting your backend on a service like Render, Railway, or Heroku
-// This allows the secure cookies to be sent through their reverse proxies.
+// 1. Trust Proxy (REQUIRED for Render/Heroku to allow secure cookies)
 app.set('trust proxy', 1);
 
-// Middleware
+// 2. Middleware
 app.use(express.json());
 
-// --- UPDATED CORS CONFIGURATION ---
+// 3. ENHANCED CORS CONFIGURATION
 const allowedOrigins = [
   'http://localhost:5173', 
-  'https://student-management-system-kk.netlify.app' // Make sure there is NO trailing slash at the end
+  'https://student-management-system-kk.netlify.app'
 ];
 
 app.use(cors({ 
-  origin: allowedOrigins, 
-  credentials: true 
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or server-to-server)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('netlify.app')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// --- UPDATED SESSION CONFIGURATION ---
+// 4. PRODUCTION-READY SESSION CONFIGURATION
 app.use(session({
   secret: process.env.SESSION_SECRET || 'mysecretessionkey',
   resave: false,
   saveUninitialized: false,
+  proxy: true, // Required for secure cookies behind a proxy like Render
   cookie: {
-    maxAge: 1000 * 60 * 60, // 1 hour
+    maxAge: 1000 * 60 * 60 * 24, // 24 hours
     httpOnly: true,
-    // MUST be true for cross-origin cookies (production). False for localhost.
+    // 🔥 VERY IMPORTANT FOR PRODUCTION:
     secure: process.env.NODE_ENV === 'production', 
-    // MUST be 'none' for cross-origin (Netlify to Backend). 'lax' for localhost.
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', 
   }
 }));
 
-// Database connection
+// 5. Static Folder for uploads (Optional, if you still use local storage)
+app.use('/uploads', express.static('uploads'));
+
+// 6. Database connection
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log('✅ MongoDB Connected successfully'))
-  .catch((err) => console.log('❌ DB Connection Error:', err));
+  .catch((err) => {
+    console.error('❌ DB Connection Error:', err.message);
+    process.exit(1); // Stop server if DB fails
+  });
 
-// Register Routes
+// 7. Register Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/student', studentRoutes); 
 app.use('/api/faculty', facultyRoutes); 
 
-// Start Server
+// 8. Health Check Route (Good for Render monitoring)
+app.get('/health', (req, res) => res.send('Server is running...'));
+
+// 9. Start Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });

@@ -10,7 +10,7 @@ const router = express.Router();
 // ==========================================
 
 // Get all students for the Faculty's Class Roster
-import Curriculum from '../models/Curriculum.js'; // Ensure this is imported
+// Ensure this is imported
 
 // Get Dashboard Statistics for the Logged-in Faculty
 router.get('/dashboard-stats', verifyFaculty, async (req, res) => {
