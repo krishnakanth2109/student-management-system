@@ -107,5 +107,76 @@ router.get('/curriculum', verifyStudent, async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch curriculum', error: error.message });
   }
 });
+// Get Dashboard Statistics
+router.get('/dashboard-stats', verifyAdmin, async (req, res) => {
+  try {
+    const totalStudents = await Student.countDocuments();
+    const totalFaculty = await Faculty.countDocuments();
+    const totalCourses = await Course.countDocuments();
+    const pendingDocs = await Document.countDocuments({ status: 'Pending' });
 
+    // Aggregate Students by Course for the Bar Chart
+    const studentsByCourse = await Student.aggregate([
+      { $group: { _id: "$course", count: { $sum: 1 } } },
+      { $project: { name: "$_id", students: "$count", _id: 0 } }
+    ]);
+
+    // Aggregate Students by Gender for the Pie Chart
+    const studentsByGender = await Student.aggregate([
+      { $group: { _id: "$gender", value: { $sum: 1 } } },
+      { $project: { name: "$_id", value: 1, _id: 0 } }
+    ]);
+
+    // Get 5 most recent student enrollments
+    const recentActivity = await Student.find()
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select('firstName lastName course createdAt');
+
+    res.status(200).json({
+      totals: { totalStudents, totalFaculty, totalCourses, pendingDocs },
+      charts: { studentsByCourse, studentsByGender },
+      recentActivity
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching dashboard stats', error: error.message });
+  }
+});
+// Get Dashboard Statistics for the Logged-in Student
+router.get('/dashboard-stats', verifyStudent, async (req, res) => {
+  try {
+    // 1. Get Logged-in Student Data (for Name and Course)
+    const studentInfo = await Student.findById(req.user.id).select('firstName lastName course');
+
+    // 2. Count Total Uploaded Documents
+    const totalDocs = await Document.countDocuments({ studentId: req.user.id });
+
+    // 3. Get Total Unpaid Fees
+    const fees = await Fee.find({ studentId: req.user.id });
+    let pendingFees = 0;
+    fees.forEach(f => { pendingFees += ((f.tuitionFee + f.labFee + (f.libraryFee || 0)) - f.amountPaid); });
+
+    // 4. Get Curriculum Stats (Group chapters by Subject to show on a chart)
+    const curriculumData = await Curriculum.aggregate([
+      { $group: { _id: "$subjectName", count: { $sum: 1 } } },
+      { $project: { subject: "$_id", chapters: "$count", _id: 0 } }
+    ]);
+
+    // 5. Get 3 most recently uploaded Syllabus chapters
+    const recentActivity = await Curriculum.find()
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .select('subjectName chapterName createdAt');
+
+    res.status(200).json({
+      student: studentInfo,
+      totalDocs,
+      pendingFees,
+      curriculumData,
+      recentActivity
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching student stats', error: error.message });
+  }
+});
 export default router;

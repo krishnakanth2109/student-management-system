@@ -10,6 +10,41 @@ const router = express.Router();
 // ==========================================
 
 // Get all students for the Faculty's Class Roster
+import Curriculum from '../models/Curriculum.js'; // Ensure this is imported
+
+// Get Dashboard Statistics for the Logged-in Faculty
+router.get('/dashboard-stats', verifyFaculty, async (req, res) => {
+  try {
+    // 1. Total Enrolled Students
+    const totalStudents = await Student.countDocuments(); 
+
+    // 2. Curriculum Metrics for this specific Faculty member
+    const myCurriculum = await Curriculum.find({ facultyId: req.user.id });
+    const totalChaptersUploaded = myCurriculum.length;
+
+    // 3. Group Chapters by Subject for the Line Chart
+    const chaptersBySubject = await Curriculum.aggregate([
+      { $match: { facultyId: req.user.id } },
+      { $group: { _id: "$subjectName", count: { $sum: 1 } } },
+      { $project: { subject: "$_id", chapters: "$count", _id: 0 } }
+    ]);
+
+    // 4. Get the 3 most recently added chapters
+    const recentActivity = await Curriculum.find({ facultyId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(3)
+      .select('subjectName chapterName createdAt');
+
+    res.status(200).json({
+      totalStudents,
+      totalChaptersUploaded,
+      chaptersBySubject,
+      recentActivity
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching faculty stats', error: error.message });
+  }
+});
 router.get('/students', verifyFaculty, async (req, res) => {
   try {
     // Fetches students from the DB (only returning necessary fields)
